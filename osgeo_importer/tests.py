@@ -14,7 +14,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.gis.gdal import DataSource
 from osgeo_importer.utils import create_vrt, ensure_defaults
 from osgeo_importer.handlers.geoserver import configure_time
-from osgeo_importer.inspectors import GDALInspector, OGRFieldConverter
+from osgeo_importer.inspectors import GDALInspector
 from geoserver.catalog import Catalog, FailedRequestError
 from geonode.layers.models import Layer
 from geonode.geoserver.helpers import ogc_server_settings
@@ -850,7 +850,16 @@ class UploaderTests(MapStoryTestMixin):
         feat = res.GetFeature(0)
         self.assertEqual(feat.GetField('name_ch'), "安州")
 
-
+    def test_non_converted_date(self):
+        """
+        Test converting a field as date.
+        """
+        results = self.generic_import('TM_WORLD_BORDERS_2005.zip', configuration_options=[{'index': 0,
+                                                                                           'start_date': 'Year',
+                                                                                           'configureTime': True}])
+        layer = self.cat.get_layer(results.typename)
+        self.assertTrue('time' in layer.resource.metadata)
+        self.assertEqual('year', layer.resource.metadata['time'].attribute)
 
 if __name__ == '__main__':
     unittest.main()

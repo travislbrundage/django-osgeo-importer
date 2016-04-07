@@ -2,7 +2,6 @@ import requests
 from django import db
 from django.conf import settings
 from osgeo_importer.inspectors import OGRFieldConverter
-from osgeo_importer.utils import setup_db
 
 
 DEFAULT_IMPORT_HANDLERS = ['osgeo_importer.handlers.FieldConverterHandler',
@@ -29,7 +28,7 @@ def ensure_can_run(func):
     return func_wrapper
 
 
-class ImportHandler(object):
+class ImportHandlerMixin(object):
     """
     A mixin providing the basic layout for handlers.
     """
@@ -53,7 +52,26 @@ class ImportHandler(object):
         return True
 
 
-class FieldConverterHandler(ImportHandler):
+class GetModifiedFieldsMixin(object):
+
+    @staticmethod
+    def update_date_attributes(layer_config):
+        """
+        Updates the start_date, end_date and convert_to_date to use modified fields if needed.
+        """
+        modified_fields = layer_config.get('modified_fields', {})
+        layer_config['start_date'] = modified_fields.get(layer_config.get('start_date'), layer_config.get('start_date'))
+        layer_config['end_date'] = modified_fields.get(layer_config.get('end_date'), layer_config.get('end_date'))
+
+        convert_to_date = []
+
+        for field in layer_config.get('convert_to_date', []):
+            convert_to_date.append(modified_fields.get(field, field))
+
+        layer_config['convert_to_date'] = convert_to_date
+
+
+class FieldConverterHandler(GetModifiedFieldsMixin, ImportHandlerMixin):
     """
     Converts fields based on the layer_configuration.
     """
@@ -62,35 +80,28 @@ class FieldConverterHandler(ImportHandler):
         d = db.connections['datastore'].settings_dict
         connection_string = "PG:dbname='%s' user='%s' password='%s' host='%s' port='%s'" % (d['NAME'], d['USER'],
                                                                         d['PASSWORD'], d['HOST'], d['PORT'])
-        conn=db.connections['datastore']
-        cursor=conn.cursor()
-        xdate_col="%s_xd"%(field.lower())
-        xdate_str="%s_str"%(field.lower())
-        query="ALTER TABLE %s ADD COLUMN %s bigdate; "%(layer,xdate_col)
-        query+="ALTER TABLE %s ADD COLUMN %s text; "%(layer,xdate_str)
-        cursor.execute(query)
-        query="UPDATE %s SET %s=xdate_str(%s::text); "%(layer,xdate_str,field)
-        cursor.execute(query)
-        query="UPDATE %s SET %s=xdate_out(%s)*1000 WHERE abs(xdate_out(%s))<9223372036854775; "%(layer,xdate_col,xdate_str,xdate_str)
-        cursor.execute(query)
-        return xdate_col
+
+        with OGRFieldConverter(connection_string) as datasource:
+            return datasource.convert_field(layer, field)
 
     @ensure_can_run
     def handle(self, layer, layer_config, *args, **kwargs):
-        setup_db()
+        self.update_date_attributes(layer_config)
+
         try:
             for field_to_convert in set(layer_config.get('convert_to_date', [])):
 
                 if not field_to_convert:
                     continue
 
-                xdate = self.convert_field_to_time(layer, field_to_convert)
+                xd_col = self.convert_field_to_time(layer, field_to_convert)
 
                 # if the start_date or end_date needed to be converted to a date
                 # field, use the newly created field name
+
                 for date_option in ('start_date', 'end_date'):
                     if layer_config.get(date_option) == field_to_convert:
-                        layer_config[date_option] = xdate.lower()
+                        layer_config[date_option] = xd_col.lower()
+
         except Exception as e:
-            import traceback
-            print(traceback.format_exc())
+            print "Error: %s"%(e)
