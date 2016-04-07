@@ -7,7 +7,6 @@ wget -N http://ares.boundlessgeo.com/geoserver/${GS_VERSION}/geoserver-${GS_VERS
 wget -N http://build.geonode.org/geoserver/latest/geoserver.war
 wget -N https://s3.amazonaws.com/django-osgeo-importer/gdal-2.1.0-linux-bin.tar.gz
 
-pip install awscli
 sudo mkdir -p -m 777 importer-test-files
-aws s3 sync s3://mapstory-data/importer-test-files/ importer-test-files
+aws s3 sync s3://mapstory-data/importer-test-files/ importer-test-files --acl="public-read"
 popd

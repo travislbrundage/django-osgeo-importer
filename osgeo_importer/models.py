@@ -67,6 +67,12 @@ def validate_inspector_can_read(value):
     temp_directory = tempfile.mkdtemp()
     filename = os.path.join(temp_directory, value.name)
 
+    filebase, fileext = os.path.splitext(value.name)
+
+
+    if fileext.lower() in ['tif','sld','xml']:
+        return
+
     with open(filename, 'wb') as f:
         for chunk in value.chunks():
             f.write(chunk)
