@@ -155,7 +155,7 @@ class UploaderTests(MapStoryTestMixin):
     def generic_import(self, file, configuration_options=[{'index': 0}]):
 
         f = file
-        filename = os.path.join(os.path.dirname(__file__), '..', 'importer-test-files', f)
+        #filename = os.path.join(os.path.dirname(__file__), '..', 'importer-test-files', f)
 
         #res = self.import_file(filename, configuration_options=configuration_options)
 
@@ -175,15 +175,15 @@ class UploaderTests(MapStoryTestMixin):
 
     def generic_raster_import(self,file,configuration_options=[{'index':0}]):
         f = file
-        filename = os.path.join(os.path.dirname(__file__), '..', 'importer-test-files', f)
-        res = self.import_file(filename, configuration_options=configuration_options)
-        layerfile=res[0][0]
-        layername = os.path.splitext(os.path.basename(layerfile))[0]
-        layer = Layer.objects.get(name=layername)
-        self.assertTrue(layerfile.endswith('.tif'))
-        self.assertTrue(os.path.exists(layerfile))
-        l = gdal.OpenEx(layerfile)
-        self.assertTrue(l.GetDriver().ShortName,'GTiff')
+        #filename = os.path.join(os.path.dirname(__file__), '..', 'importer-test-files', f)
+        layer = self.generic_api_import(file,configuration_options)
+        #layerfile=res[0][0]
+        #layername = os.path.splitext(os.path.basename(layerfile))[0]
+        #layer = Layer.objects.get(name=layername)
+        #self.assertTrue(layerfile.endswith('.tif'))
+        #self.assertTrue(os.path.exists(layerfile))
+        #l = gdal.OpenEx(layerfile)
+        #self.assertTrue(l.GetDriver().ShortName,'GTiff')
         return layer
 
     def test_raster(self):
