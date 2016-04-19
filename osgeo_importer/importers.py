@@ -3,7 +3,8 @@ import ogr
 import osr
 import gdal
 from .inspectors import GDALInspector, OGRInspector
-from .utils import FileTypeNotAllowed, GdalErrorHandler, load_handler, launder, increment, increment_filename, raster_import, decode
+from .utils import FileTypeNotAllowed, GdalErrorHandler, load_handler, launder, increment, increment_filename, \
+    raster_import, decode
 from .handlers import IMPORT_HANDLERS
 from django.conf import settings
 from django import db
@@ -12,7 +13,7 @@ ogr.UseExceptions()
 
 
 OSGEO_IMPORTER = getattr(settings, 'OSGEO_IMPORTER', 'osgeo_importer.importers.OGRImport')
-RASTER_FILES = getattr(settings, 'RASTER_FILES','/tmp')
+RASTER_FILES = getattr(settings, 'RASTER_FILES', '/tmp')
 
 
 class Import(object):
@@ -70,7 +71,7 @@ class Import(object):
         """
         raise FileTypeNotAllowed
 
-    def handle(self, configuration_options=[{'index':0}], *args, **kwargs):
+    def handle(self, configuration_options=[{'index': 0}], *args, **kwargs):
         """
         Executes the entire import process.
         1) Imports the dataset from the source dataset to the target.
@@ -101,7 +102,7 @@ class Import(object):
         self.handler_results = []
 
         for handler in self.import_handlers:
-            self.handler_results.append({type(handler).__name__ : handler.handle(layer, layer_config, *args, **kwargs)})
+            self.handler_results.append({type(handler).__name__: handler.handle(layer, layer_config, *args, **kwargs)})
 
         return self.handler_results
 
@@ -112,7 +113,7 @@ class Import(object):
         :param configuration_options: A list of configuration options that are sent to the
         import method and subsequently to the handlers.
         :param inspectors: A list of inspector classes that are run through in order.
-        :return: The response from the first inspctor providing a response that is not None.
+        :return: The response from the first inspector providing a response that is not None.
         """
 
         for inspector in inspectors:
@@ -210,16 +211,16 @@ class OGRImport(Import):
 
         data, _ = self.open_source_datastore(filename, *args, **kwargs)
 
-        if data.GetDriver().ShortName=='GTiff':
-            '''
+        if data.GetDriver().ShortName == 'GTiff':
+            """
             File is a GeoTiff, we need to convert into optimized GeoTiff
             and skip any further testing or loading into target_store
-            '''
-            #Increment filname to make sure target doesn't exists
-            filedir,filebase=os.path.split(filename)
-            fileout=increment_filename(os.path.join(RASTER_FILES,filebase))
-            raster_import(filename,fileout)
-            layer_options=configuration_options[0]
+            """
+            #  Increment filename to make sure target doesn't exists
+            filedir, filebase = os.path.split(filename)
+            fileout = increment_filename(os.path.join(RASTER_FILES, filebase))
+            raster_import(filename, fileout)
+            layer_options = configuration_options[0]
             self.completed_layers.append([fileout, layer_options])
             return self.completed_layers
 
@@ -231,6 +232,7 @@ class OGRImport(Import):
             target_create_options.append('PRECISION=NO')
 
         for layer_options in configuration_options:
+            layer_options['modified_fields'] = {}
             layer = data.GetLayer(layer_options.get('index'))
             layer_name = layer_options.get('name', layer.GetName().lower())
             layer_type = self.get_layer_type(layer, data)
@@ -253,7 +255,8 @@ class OGRImport(Import):
             while True:
                 n += 1
                 try:
-                    target_layer = self.create_target_dataset(target_file, layer_name, srs, layer_type, options=target_create_options)
+                    target_layer = self.create_target_dataset(target_file, layer_name, srs, layer_type,
+                                                              options=target_create_options)
                 except RuntimeError as e:
                     # the layer already exists in the target store, increment the name
                     if 'Use the layer creation option OVERWRITE=YES to replace it.' in e.message:
@@ -270,16 +273,28 @@ class OGRImport(Import):
 
             # adding fields to new layer
             layer_definition = ogr.Feature(layer.GetLayerDefn())
+            source_fid = None
 
             for i in range(layer_definition.GetFieldCount()):
-                target_layer.CreateField(layer_definition.GetFieldDefnRef(i))
+
+                field_def = layer_definition.GetFieldDefnRef(i)
+
+                target_layer.CreateField(field_def)
+                new_name = target_layer.GetLayerDefn().GetFieldDefn(i).GetName()
+                old_name = field_def.GetName()
+
+                if new_name != old_name:
+                    layer_options['modified_fields'][old_name] = new_name
+
+                if old_name == target_layer.GetFIDColumn() and not layer.GetFIDColumn():
+                    source_fid = i
 
             for i in range(0, layer.GetFeatureCount()):
                 feature = layer.GetFeature(i)
 
                 if feature and feature.geometry():
                     if feature.geometry().GetGeometryType() != target_layer.GetGeomType() and \
-                        target_layer.GetGeomType() in range(4, 7):
+                            target_layer.GetGeomType() in range(4, 7):
 
                         conversion_function = ogr.ForceToMultiPolygon
 
@@ -291,6 +306,8 @@ class OGRImport(Import):
 
                         geom = ogr.CreateGeometryFromWkb(feature.geometry().ExportToWkb())
                         feature.SetGeometry(conversion_function(geom))
+                        if source_fid is not None:
+                            feature.SetFID(feature.GetField(source_fid))
 
                     try:
                         target_layer.CreateFeature(feature)

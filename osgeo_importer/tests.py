@@ -853,6 +853,22 @@ class UploaderTests(MapStoryTestMixin):
         feat = res.GetFeature(0)
         self.assertEqual(feat.GetField('name_ch'), "安州")
 
+    def test_non_converted_date(self):
+        """
+        Test converting a field as date.
+        """
+        results = self.generic_import('TM_WORLD_BORDERS_2005.zip', configuration_options=[{'index': 0,
+                                                                                           'start_date': 'Year',
+                                                                                           'configureTime': True}])
+        layer = self.cat.get_layer(results.typename)
+        self.assertTrue('time' in layer.resource.metadata)
+        self.assertEqual('year', layer.resource.metadata['time'].attribute)
+
+    def test_fid_field(self):
+        """
+        Regression test for preserving an FID field when target layer supports it but source does not.
+        """
+        self.generic_import('noaa_paleoclimate.zip', configuration_options=[{'index': 0}])
 
 
 if __name__ == '__main__':

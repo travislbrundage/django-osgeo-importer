@@ -1,6 +1,6 @@
 from geonode.layers.models import Layer
 from osgeo_importer.models import UploadLayer
-from osgeo_importer.handlers import ImportHandler
+from osgeo_importer.handlers import ImportHandlerMixin
 from osgeo_importer.handlers import ensure_can_run
 from geonode.geoserver.helpers import gs_slurp
 from django.contrib.auth import get_user_model
@@ -11,7 +11,7 @@ import re
 User = get_user_model()
 
 
-class GeoNodePublishHandler(ImportHandler):
+class GeoNodePublishHandler(ImportHandlerMixin):
     """
     Creates a GeoNode Layer from a layer in Geoserver.
     """
@@ -48,12 +48,12 @@ class GeoNodePublishHandler(ImportHandler):
         if isinstance(owner, str) or isinstance(owner, unicode):
             owner = User.objects.filter(username=owner).first()
 
-        if re.search(r'\.tif$',layer):
+        if re.search(r'\.tif$', layer):
             store_name = os.path.splitext(os.path.basename(layer))[0]
-            filter=None
+            filter = None
         else:
-            store_name=self.store_name
-            filter=layer
+            store_name = self.store_name
+            filter = layer
 
         results = gs_slurp(workspace=self.workspace,
                            store=store_name,
@@ -63,7 +63,8 @@ class GeoNodePublishHandler(ImportHandler):
 
         if self.importer.upload_file and results['layers'][0]['status'] == 'created':
             matched_layer = Layer.objects.get(name=results['layers'][0]['name'])
-            upload_layer = UploadLayer.objects.get(upload=self.importer.upload_file.upload, index=layer_config.get('index'))
+            upload_layer = UploadLayer.objects.get(upload=self.importer.upload_file.upload,
+                                                   index=layer_config.get('index'))
             upload_layer.layer = matched_layer
             upload_layer.save()
 

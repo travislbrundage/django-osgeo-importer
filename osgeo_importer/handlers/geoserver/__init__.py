@@ -1,9 +1,8 @@
 import requests
 from decimal import Decimal, InvalidOperation
-from osgeo_importer.handlers import ImportHandler
+from osgeo_importer.handlers import ImportHandlerMixin, GetModifiedFieldsMixin
 from geoserver.catalog import FailedRequestError
 from osgeo_importer.handlers import ensure_can_run
-from geonode.upload.utils import create_geoserver_db_featurestore
 from django import db
 from geonode.geoserver.helpers import gs_catalog
 from geoserver.support import DimensionInfo
@@ -21,7 +20,7 @@ def configure_time(resource, name='time', enabled=True, presentation='LIST', res
     return resource.catalog.save(resource)
 
 
-class GeoServerTimeHandler(ImportHandler):
+class GeoServerTimeHandler(GetModifiedFieldsMixin, ImportHandlerMixin):
     """
     Enables time in Geoserver for a layer.
     """
@@ -30,7 +29,11 @@ class GeoServerTimeHandler(ImportHandler):
         """
         Returns true if the configuration has enough information to run the handler.
         """
-        if not all([layer_config.get('configureTime', False), layer_config.get('start_date', None)]):
+
+        if not layer_config.get('configureTime', None):
+            return False
+
+        if not any([layer_config.get('start_date', None), layer_config.get('end_date', None)]):
             return False
 
         return True
@@ -45,12 +48,14 @@ class GeoServerTimeHandler(ImportHandler):
         "start_date": Passed as the start time to Geoserver.
         "end_date" (optional): Passed as the end attribute to Geoserver.
         """
+
         lyr = gs_catalog.get_layer(layer)
+        self.update_date_attributes(layer_config)
         configure_time(lyr.resource, attribute=layer_config.get('start_date'),
-                       end_attribute=layer_config.get('end_date'))
+                       end_attribute=layer_config.get('start_date'))
 
 
-class GeoserverPublishHandler(ImportHandler):
+class GeoserverPublishHandler(ImportHandlerMixin):
     catalog = gs_catalog
     workspace = 'geonode'
     srs = 'EPSG:4326'
@@ -59,7 +64,7 @@ class GeoserverPublishHandler(ImportHandler):
         """
         Returns true if the configuration has enough information to run the handler.
         """
-        if re.search(r'\.tif$',layer):
+        if re.search(r'\.tif$', layer):
             return False
 
         return True
@@ -135,7 +140,7 @@ class GeoserverPublishHandler(ImportHandler):
         return self.catalog.publish_featuretype(layer, self.get_or_create_datastore(layer_config), self.srs)
 
 
-class GeoserverPublishCoverageHandler(ImportHandler):
+class GeoserverPublishCoverageHandler(ImportHandlerMixin):
     catalog = gs_catalog
     workspace = 'geonode'
 
@@ -143,7 +148,7 @@ class GeoserverPublishCoverageHandler(ImportHandler):
         """
         Returns true if the configuration has enough information to run the handler.
         """
-        if re.search(r'\.tif$',layer):
+        if re.search(r'\.tif$', layer):
             return True
 
         return False
@@ -154,13 +159,12 @@ class GeoserverPublishCoverageHandler(ImportHandler):
         Publishes a Coverage layer to GeoServer.
         """
         name = os.path.splitext(os.path.basename(layer))[0]
-        file = 'file:' + layer
-        workspace=self.catalog.get_workspace(self.workspace)
+        workspace = self.catalog.get_workspace(self.workspace)
 
-        return self.catalog.create_coveragestore(name,layer,workspace,False)
+        return self.catalog.create_coveragestore(name, layer, workspace, False)
 
 
-class GeoWebCacheHandler(ImportHandler):
+class GeoWebCacheHandler(ImportHandlerMixin):
     """
     Configures GeoWebCache for a layer in Geoserver.
     """
@@ -252,7 +256,7 @@ class GeoWebCacheHandler(ImportHandler):
                                          body=self.config(regex_parameter_filter=regex_filter, name=self.layer.name))
 
 
-class GeoServerBoundsHandler(ImportHandler):
+class GeoServerBoundsHandler(ImportHandlerMixin):
     """
     Sets the lat/long bounding box of a layer to the max extent of WGS84 if the values of the current lat/long
     bounding box fail the Decimal quantize method (which Django uses internally when validating decimals).

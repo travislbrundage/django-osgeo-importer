@@ -1,4 +1,3 @@
-import requests
 from django import db
 from django.conf import settings
 from osgeo_importer.inspectors import OGRFieldConverter
@@ -28,7 +27,7 @@ def ensure_can_run(func):
     return func_wrapper
 
 
-class ImportHandler(object):
+class ImportHandlerMixin(object):
     """
     A mixin providing the basic layout for handlers.
     """
@@ -52,7 +51,26 @@ class ImportHandler(object):
         return True
 
 
-class FieldConverterHandler(ImportHandler):
+class GetModifiedFieldsMixin(object):
+
+    @staticmethod
+    def update_date_attributes(layer_config):
+        """
+        Updates the start_date, end_date and convert_to_date to use modified fields if needed.
+        """
+        modified_fields = layer_config.get('modified_fields', {})
+        layer_config['start_date'] = modified_fields.get(layer_config.get('start_date'), layer_config.get('start_date'))
+        layer_config['end_date'] = modified_fields.get(layer_config.get('end_date'), layer_config.get('end_date'))
+
+        convert_to_date = []
+
+        for field in layer_config.get('convert_to_date', []):
+            convert_to_date.append(modified_fields.get(field, field))
+
+        layer_config['convert_to_date'] = convert_to_date
+
+
+class FieldConverterHandler(GetModifiedFieldsMixin, ImportHandlerMixin):
     """
     Converts fields based on the layer_configuration.
     """
@@ -60,13 +78,15 @@ class FieldConverterHandler(ImportHandler):
     def convert_field_to_time(self, layer, field):
         d = db.connections['datastore'].settings_dict
         connection_string = "PG:dbname='%s' user='%s' password='%s' host='%s' port='%s'" % (d['NAME'], d['USER'],
-                                                                        d['PASSWORD'], d['HOST'], d['PORT'])
+                                                                                            d['PASSWORD'], d['HOST'],
+                                                                                            d['PORT'])
 
         with OGRFieldConverter(connection_string) as datasource:
             return datasource.convert_field(layer, field)
 
     @ensure_can_run
     def handle(self, layer, layer_config, *args, **kwargs):
+        self.update_date_attributes(layer_config)
         try:
             for field_to_convert in set(layer_config.get('convert_to_date', [])):
 
@@ -77,8 +97,10 @@ class FieldConverterHandler(ImportHandler):
 
                 # if the start_date or end_date needed to be converted to a date
                 # field, use the newly created field name
+
                 for date_option in ('start_date', 'end_date'):
                     if layer_config.get(date_option) == field_to_convert:
                         layer_config[date_option] = xd_col.lower()
+
         except Exception as e:
-            print "Error: %s"%(e)
+            print "Error: %s" % e
