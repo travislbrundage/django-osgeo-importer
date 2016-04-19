@@ -57,44 +57,16 @@ def validate_file_extension(value):
     raise ValidationError(u'Invalid File Type')
 
 
-def validate_file_type(value):
-    """
-    Returns the general file type
-    """
-    name = value.name
-<<<<<<< HEAD
-    root,extension=os.path.splitext(name.lower())
-=======
-    root, extension = os.path.splitext(name.lower())
->>>>>>> master
-    if extension == 'tif':
-        return 'raster'
-    if extension == 'sld':
-        return 'style'
-    if extension == 'xml':
-        return
-
-
 def validate_inspector_can_read(value):
     """
     Validates Geospatial data.
     """
     name = value.name
-<<<<<<< HEAD
-    root,extension=os.path.splitext(name.lower())
-=======
     root, extension = os.path.splitext(name.lower())
->>>>>>> master
 
     temp_directory = tempfile.mkdtemp()
     filename = os.path.join(temp_directory, value.name)
-
-<<<<<<< HEAD
-
-    if extension in ['sld','xml']: #allow uploads of sld and xml metadata
-=======
     if extension in ['sld', 'xml']:  # allow uploads of sld and xml metadata
->>>>>>> master
         return
 
     if extension in ['tif']:
@@ -279,7 +251,6 @@ class UploadException(models.Model):
         """
         A method to create a new saved exception.
         """
-
         if verbose_message is None:
             verbose_message = error
 

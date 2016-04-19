@@ -305,11 +305,12 @@ def raster_import(infile, outfile, *args, **kwargs):
     outdata = None
     return outfile
 
+
 def quote_ident(str):
-    conn=db.connections['datastore']
-    cursor=conn.cursor()
-    query="SELECT quote_ident(%s);"
-    cursor.execute(query,(str,))
+    conn = db.connections['datastore']
+    cursor = conn.cursor()
+    query = "SELECT quote_ident(%s);"
+    cursor.execute(query, (str, ))
     return cursor.fetchone()[0]
 
 

@@ -1,9 +1,7 @@
 import os
-
 import gdal
 import ogr
 from django.conf import settings
-from .utils import import_by_path
 from .utils import NoDataSourceFound, GDAL_GEOMETRY_TYPES, increment, timeparse, quote_ident
 from django import db
 
@@ -334,9 +332,9 @@ class OGRFieldConverter(OGRInspector):
             # prevent segfaults
             feat = None
 
-        conn=db.connections['datastore']
-        cursor=conn.cursor()
-        query="""
+        conn = db.connections['datastore']
+        cursor = conn.cursor()
+        query = """
         DO $$
         BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='bigdate') THEN
