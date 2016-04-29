@@ -194,7 +194,7 @@ class UploadFile(models.Model):
         self.file.delete(False)
         super(UploadFile, self).delete(*args, **kwargs)
 
-        
+
 class UploadLayer(models.Model):
     """
     Layers stored in an uploaded data set.

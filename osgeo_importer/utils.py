@@ -84,7 +84,7 @@ def timeparse(timestr):
     #  try just using straight datetime parsing
     if bc is False:
         try:
-            log.debug('trying %s as direct parse', timestr)
+            # log.debug('trying %s as direct parse', timestr)
             dt = parse(timestr, default=DEFAULT)
             t = numpy.datetime64(dt.isoformat()).astype(
                 'datetime64[s]').astype('int64')

@@ -137,7 +137,8 @@ class GeoserverPublishHandler(ImportHandlerMixin):
         if getattr(store, 'type', '').lower() == 'geogig':
             self.geogig_handler(store, layer, layer_config)
 
-        return self.catalog.publish_featuretype(layer, self.get_or_create_datastore(layer_config), self.srs)
+        self.catalog.publish_featuretype(layer, self.get_or_create_datastore(layer_config), self.srs)
+        return True
 
 
 class GeoserverPublishCoverageHandler(ImportHandlerMixin):
@@ -160,8 +161,8 @@ class GeoserverPublishCoverageHandler(ImportHandlerMixin):
         """
         name = os.path.splitext(os.path.basename(layer))[0]
         workspace = self.catalog.get_workspace(self.workspace)
-
-        return self.catalog.create_coveragestore(name, layer, workspace, False)
+        self.catalog.create_coveragestore(name, layer, workspace, True)
+        return True
 
 
 class GeoWebCacheHandler(ImportHandlerMixin):
