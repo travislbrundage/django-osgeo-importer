@@ -201,6 +201,7 @@ class MultiUpload(View, ImportHelper, JSONResponseMixin):
                 configuration_options.update({'index': layer.get('index')})
                 upload.uploadlayer_set.add(
                     UploadLayer(
+                        upload_file=upfile,
                         name=layer.get('name'),
                         fields=layer.get(
                             'fields',
@@ -212,8 +213,7 @@ class MultiUpload(View, ImportHelper, JSONResponseMixin):
         upload.state = 'UPLOADED'
         upload.complete = True
         upload.save()
-        # return HttpResponseRedirect(reverse_lazy('uploads-list'),
-        # kwargs={'pk':upload.pk}
+
         count = UploadFile.objects.filter(upload=upload).count()
         uploaded = []
         for uploadedfile in UploadFile.objects.filter(upload=upload):
