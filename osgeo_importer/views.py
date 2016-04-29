@@ -1,21 +1,31 @@
 import json
-from django.http import HttpResponse
-from django.views.generic import FormView, ListView, TemplateView
+import os
+import shutil
+from django.http import HttpResponse, Http404
+from django.views.generic import View, FormView, ListView, TemplateView
 from django.core.urlresolvers import reverse_lazy
+from django.core.files.storage import FileSystemStorage
+from zipfile import ZipFile
 from .forms import UploadFileForm
-from .models import UploadedData, UploadLayer, DEFAULT_LAYER_CONFIGURATION
+from .models import UploadedData, UploadLayer, DEFAULT_LAYER_CONFIGURATION, UploadFile
 from .importers import OSGEO_IMPORTER
 from .inspectors import OSGEO_INSPECTOR
-from .utils import import_string
+from .utils import import_string, CheckFile
+from .tasks import import_object
+
+import logging
+log = logging.getLogger(__name__)
 
 OSGEO_INSPECTOR = import_string(OSGEO_INSPECTOR)
 OSGEO_IMPORTER = import_string(OSGEO_IMPORTER)
+MEDIA_ROOT = FileSystemStorage().location
 
 
 class JSONResponseMixin(object):
     """
     A mixin that can be used to render a JSON response.
     """
+
     def render_to_json_response(self, context, **response_kwargs):
         """
         Returns a JSON response, transforming 'context' to make the payload.
@@ -38,6 +48,7 @@ class JSONResponseMixin(object):
 
 
 class JSONView(JSONResponseMixin, TemplateView):
+
     def render_to_response(self, context, **response_kwargs):
         return self.render_to_json_response(context, **response_kwargs)
 
@@ -77,7 +88,8 @@ class FileAddView(FormView, ImportHelper, JSONResponseMixin):
         """
         Creates an upload session from the file.
         """
-        upload = UploadedData.objects.create(user=self.request.user, state='UPLOADED', complete=True)
+        upload = UploadedData.objects.create(
+            user=self.request.user, state='UPLOADED', complete=True)
         upload_file.upload = upload
         upload_file.save()
         upload.size = upload_file.file.size
@@ -90,11 +102,15 @@ class FileAddView(FormView, ImportHelper, JSONResponseMixin):
         for layer in description:
             configuration_options = DEFAULT_LAYER_CONFIGURATION.copy()
             configuration_options.update({'index': layer.get('index')})
-            upload.uploadlayer_set.add(UploadLayer(name=layer.get('name'),
-                                                   fields=layer.get('fields', {}),
-                                                   index=layer.get('index'),
-                                                   feature_count=layer.get('feature_count'),
-                                                   configuration_options=configuration_options))
+            upload.uploadlayer_set.add(
+                UploadLayer(
+                    name=layer.get('name'),
+                    fields=layer.get(
+                        'fields',
+                        {}),
+                    index=layer.get('index'),
+                    feature_count=layer.get('feature_count'),
+                    configuration_options=configuration_options))
         upload.save()
         return upload
 
@@ -104,7 +120,8 @@ class FileAddView(FormView, ImportHelper, JSONResponseMixin):
         upload = self.create_upload_session(form.instance)
 
         if self.json:
-            return self.render_to_json_response({'state': upload.state, 'id': upload.id})
+            return self.render_to_json_response(
+                {'state': upload.state, 'id': upload.id})
 
         return super(FileAddView, self).form_valid(form)
 
@@ -114,4 +131,131 @@ class FileAddView(FormView, ImportHelper, JSONResponseMixin):
             context = {'errors': context['form'].errors}
             return self.render_to_json_response(context, **response_kwargs)
 
-        return super(FileAddView, self).render_to_response(context, **response_kwargs)
+        return super(
+            FileAddView,
+            self).render_to_response(
+            context,
+            **response_kwargs)
+
+
+class MultiUpload(View, ImportHelper, JSONResponseMixin):
+    json = False
+
+    def post(self, request):
+        log.debug("File List: %s", request.FILES.getlist('file'))
+        if request.FILES is None:
+            return Http404
+        upload = UploadedData.objects.create(user=request.user)
+        upload.save()
+        if upload.pk < 1:
+            return Http404
+        savedir = os.path.join(MEDIA_ROOT, 'uploads', str(upload.pk))
+        # remove any folders with this upload id
+        if os.path.exists(savedir):
+            shutil.rmtree(savedir)
+        os.mkdir(savedir)
+        log.debug('Saving Files to %s', savedir)
+        req_files = request.FILES.getlist('file')
+
+        # Get Zipfiles
+        zipfiles = [file for file in req_files if CheckFile(file).zip]
+        log.debug('Zipfiles: %s', zipfiles)
+        for z in zipfiles:
+            req_files.remove(z)
+            with ZipFile(z) as zip:
+                for zipf in zip.namelist():
+                    log.debug(zipf)
+                    zipfc = CheckFile(zipf)
+                    log.debug(zipfc.valid_extension)
+                    if not zipfc.valid_extension:
+                        log.debug('ignoring %s', zipfc.name)
+                        continue
+                    with zip.open(zipfc.name) as f:
+                        with open(os.path.join(savedir, zipfc.name), 'wb') as outfile:
+                            log.debug('copying %s', zipfc.name)
+                            shutil.copyfileobj(f, outfile)
+        for file in req_files:
+            filec = CheckFile(file)
+            log.debug("File name: %s", filec.name)
+            log.debug("valid %s", filec.valid_extension)
+            if filec.valid_extension:
+                with open(os.path.join(savedir, filec.name), 'w') as sf:
+                    sf.write(file.read())
+            else:
+                log.debug('Skipping Unsupported File: %s', filec.name)
+        dirfiles = os.listdir(savedir)
+        log.debug('Files copied to %s, %s', savedir, dirfiles)
+        for dirfile in dirfiles:
+            dirfile = CheckFile(dirfile)
+            upfile = UploadFile(upload=upload)
+            upfile.file.name = os.path.join(
+                'uploads', str(upload.pk), dirfile.basename)
+            upfile.save()
+
+            if dirfile.support:
+                continue
+            description = self.get_fields(upfile.file.path)
+
+            for layer in description:
+                configuration_options = DEFAULT_LAYER_CONFIGURATION.copy()
+                configuration_options.update({'index': layer.get('index')})
+                upload.uploadlayer_set.add(
+                    UploadLayer(
+                        name=layer.get('name'),
+                        fields=layer.get(
+                            'fields',
+                            {}),
+                        index=layer.get('index'),
+                        feature_count=layer.get('feature_count'),
+                        configuration_options=configuration_options))
+
+        upload.state = 'UPLOADED'
+        upload.complete = True
+        upload.save()
+        # return HttpResponseRedirect(reverse_lazy('uploads-list'),
+        # kwargs={'pk':upload.pk}
+        count = UploadFile.objects.filter(upload=upload).count()
+        uploaded = []
+        for uploadedfile in UploadFile.objects.filter(upload=upload):
+            uploaded.append({'pk': uploadedfile.pk,
+                             'name': uploadedfile.name,
+                             'ext': CheckFile(uploadedfile.name).ext})
+        if self.json:
+            return self.render_to_json_response({'state': upload.state,
+                                                 'id': upload.id,
+                                                 'count': count,
+                                                 'uploaded': uploaded})
+        return HttpResponse('<html><body>Woohoo!</body></html>')
+
+
+class LayerView(View, JSONResponseMixin):
+    json = False
+
+    def post(self, request):
+        log.debug(request.body)
+        configs = json.loads(request.body)
+        log.debug(configs)
+        log.debug(len(configs))
+        log.debug(type(configs))
+        if isinstance(configs, type({})):
+            configs = [configs]
+        log.debug(configs)
+        complete = []
+        for config in configs:
+            log.debug(config)
+            file_id = config['id']
+            cfg = config['config']
+            lyrs = import_object(file_id, cfg)
+            log.debug('lyrs ---------- %s', lyrs)
+            for lyr in lyrs:
+                log.debug('Layer: %s', lyr)
+                layer = lyr[1]
+                layer['name'] = lyr[0]
+                log.debug('Cleaned Layer: %s', layer)
+                complete.append(layer)
+        if self.json:
+            return HttpResponse(
+                json.dumps(complete),
+                content_type='application/json'
+            )
+        return HttpResponse('<html><body>Woohoo!</body></html>')

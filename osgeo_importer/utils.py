@@ -1,5 +1,4 @@
 import gdal
-import logging
 import numpy
 import ogr
 import osr
@@ -15,7 +14,8 @@ from dateutil.parser import parse
 from django.template import Context, Template
 from django.conf import settings
 from django import db
-logger = logging.getLogger(__name__)
+import logging
+log = logging.getLogger(__name__)
 
 try:
     from django.utils.module_loading import import_string
@@ -27,24 +27,24 @@ ogr.UseExceptions()
 gdal.UseExceptions()
 
 GDAL_GEOMETRY_TYPES = {
-   0: 'Unknown',
-   1: 'Point',
-   2: 'LineString',
-   3: 'Polygon',
-   4: 'MultiPoint',
-   5: 'MultiLineString',
-   6: 'MultiPolygon',
-   7: 'GeometryCollection',
-   100: 'None',
-   101: 'LinearRing',
-   1 + -2147483648: 'Point',
-   2 + -2147483648: 'LineString',
-   3 + -2147483648: 'Polygon',
-   4 + -2147483648: 'MultiPoint',
-   5 + -2147483648: 'MultiLineString',
-   6 + -2147483648: 'MultiPolygon',
-   7 + -2147483648: 'GeometryCollection',
-   }
+    0: 'Unknown',
+    1: 'Point',
+    2: 'LineString',
+    3: 'Polygon',
+    4: 'MultiPoint',
+    5: 'MultiLineString',
+    6: 'MultiPolygon',
+    7: 'GeometryCollection',
+    100: 'None',
+    101: 'LinearRing',
+    1 + -2147483648: 'Point',
+    2 + -2147483648: 'LineString',
+    3 + -2147483648: 'Polygon',
+    4 + -2147483648: 'MultiPoint',
+    5 + -2147483648: 'MultiLineString',
+    6 + -2147483648: 'MultiPolygon',
+    7 + -2147483648: 'GeometryCollection',
+}
 
 
 BASE_VRT = '''
@@ -84,9 +84,10 @@ def timeparse(timestr):
     #  try just using straight datetime parsing
     if bc is False:
         try:
-            logger.debug('trying %s as direct parse', timestr)
+            log.debug('trying %s as direct parse', timestr)
             dt = parse(timestr, default=DEFAULT)
-            t = numpy.datetime64(dt.isoformat()).astype('datetime64[s]').astype('int64')
+            t = numpy.datetime64(dt.isoformat()).astype(
+                'datetime64[s]').astype('int64')
             return t, str(numpy.datetime64(t, 's'))
         except:
             pass
@@ -114,7 +115,7 @@ def create_vrt(file_path):
     headers = None
 
     with open(file_path) as csv_file:
-            headers = DictReader(csv_file, dialect='excel').fieldnames
+        headers = DictReader(csv_file, dialect='excel').fieldnames
 
     for header in headers:
         if re.search(r'\b(lat|latitude|y)\b', header.lower()):
@@ -158,6 +159,7 @@ class StdOutCapture(list):
 
 
 class GdalErrorHandler(object):
+
     def __init__(self):
         self.err_level = gdal.CE_None
         self.err_no = 0
@@ -175,9 +177,9 @@ def increment(s):
     """ look for the last sequence of number(s) in a string and increment """
     m = lastNum.search(s)
     if m:
-        next = str(int(m.group(1))+1)
+        next = str(int(m.group(1)) + 1)
         start, end = m.span(1)
-        s = s[:max(end-len(next), start)] + next + s[end:]
+        s = s[:max(end - len(next), start)] + next + s[end:]
     else:
         return s + '0'
     return s
@@ -322,3 +324,46 @@ def decode(s, encodings=('ascii', 'utf8', 'latin1')):
         except UnicodeDecodeError:
             pass
     return s.decode('ascii', 'ignore')
+
+
+class CheckFile(object):
+
+    def __init__(self, file=None):
+        self.RASTER_EXTENSIONS = getattr(
+            settings, 'OSGEO_IMPORTER_RASTER_EXTENSIONS', ['tif'])
+        self.VECTOR_EXTENSIONS = getattr(
+            settings, 'OSGEO_IMPORTER_VECTOR_EXTENSIONS', [
+                'gpx', 'geojson', 'json', 'zip', 'tar', 'kml', 'csv', 'shp'])
+        self.SUPPORT_EXTENSIONS = getattr(
+            settings, 'OSGEO_IMPORTER_SUPPORT_EXTENSIONS', [
+                'xml', 'sld', 'prj', 'dbf', 'shx'])
+        self.DATA_EXTENSIONS = self.RASTER_EXTENSIONS + self.VECTOR_EXTENSIONS
+        self.VALID_EXTENSIONS = self.DATA_EXTENSIONS + self.SUPPORT_EXTENSIONS
+        try:
+            self.name = file.name
+        except:
+            self.name = file
+        if self.name != '' and self.name is not None:
+            self.basename = os.path.basename(self.name)
+            self.dirname = os.path.dirname(self.name)
+            self.root = os.path.splitext(self.basename)[0]
+            self.ext = self.file_ext()
+            self.raster = self.validate_extension(self.RASTER_EXTENSIONS)
+            self.vector = self.validate_extension(self.VECTOR_EXTENSIONS)
+            self.support = self.validate_extension(self.SUPPORT_EXTENSIONS)
+            self.datafile = self.validate_extension(self.DATA_EXTENSIONS)
+            self.valid_extension = self.validate_extension(
+                self.VALID_EXTENSIONS)
+            if self.ext == 'zip':
+                self.zip = True
+            else:
+                self.zip = False
+
+    def file_ext(self):
+        return os.path.splitext(self.name.lower())[1].replace('.', '')
+
+    def validate_extension(self, extlist):
+        if self.ext in extlist:
+            return True
+        else:
+            return False
