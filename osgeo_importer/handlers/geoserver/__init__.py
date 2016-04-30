@@ -6,6 +6,7 @@ from osgeo_importer.handlers import ensure_can_run
 from django import db
 from geonode.geoserver.helpers import gs_catalog
 from geoserver.support import DimensionInfo
+from osgeo_importer.utils import CheckFile
 import re
 import os
 
@@ -290,3 +291,52 @@ class GeoServerBoundsHandler(ImportHandlerMixin):
         except InvalidOperation:
             resource.latlon_bbox = ['-180', '180', '-90', '90', 'EPSG:4326']
             self.catalog.save(resource)
+
+
+class GeoServerStyleHandler(GetModifiedFieldsMixin, ImportHandlerMixin):
+    """
+    Enables time in Geoserver for a layer.
+    """
+
+    catalog = gs_catalog
+    workspace = 'geonode'
+
+    def can_run(self, layer, layer_config, *args, **kwargs):
+        """
+        Returns true if the configuration has enough information to run the handler.
+        """
+
+        if not any([layer_config.get('default_sld', None), layer_config.get('slds', None)]):
+            return False
+
+        return True
+
+    @ensure_can_run
+    def handle(self, layer, layer_config, *args, **kwargs):
+        """
+        Configures time on the object.
+
+        Handler specific params:
+        "default_sld": SLD to load as default_sld
+        "slds": SLDS to add to layer
+        """
+        default_sld = layer_config.get('default_sld', None)
+        slds = layer_config.get('slds', None)
+        all_slds = list(set(default_sld + slds))
+        all_slds = [CheckFile(x) for x in all_slds if x is not None]
+
+        styles = []
+        default_style = None
+        for sld in all_slds:
+            with open(sld.name) as s:
+                self.catalog.create_style(sld.root, s.read(), overwrite=False, workspace=self.workspace)
+                style = self.catalog.get_style(sld.root, workspace=self.workspace)
+                if sld.name == default_sld:
+                    default_style = style
+                styles.append(style)
+
+        lyr = self.catalog.get_layer(layer)
+        lyr.styles = list(set(lyr.styles + styles))
+        if default_style is not None:
+            lyr.default_style = default_style
+        self.catalog.save(lyr)

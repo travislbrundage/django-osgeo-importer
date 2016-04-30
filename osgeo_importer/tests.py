@@ -159,7 +159,6 @@ class UploaderTests(MapStoryTestMixin):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(content['id'], 1)
-        print content
         return content
 
     def generic_import(self, file, configuration_options=[{'index': 0}]):

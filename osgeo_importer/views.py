@@ -172,6 +172,7 @@ def configure_layers(configs, upload_id=None):
             log.debug('lyrs ---------- %s', lyrs)
             for lyr in lyrs:
                 complete.append(lyr)
+
     return complete
 
 
@@ -269,7 +270,7 @@ class MultiUpload(View, ImportHelper, JSONResponseMixin):
         if request.POST.get('json') is not None:
             log.debug('Processing JSON configuration')
             config = json.loads(request.POST['json'])
-            complete_layers = configure_layers(config, upload.pk)
+            complete_layers = configure_layers(config, upload_id=upload.pk)
             response['layers'] = complete_layers
 
         if self.json:
