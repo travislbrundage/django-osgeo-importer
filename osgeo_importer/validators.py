@@ -41,6 +41,11 @@ def valid_file(file):
     return errors
 
 
+# Need a new validation function here to validate mac os x zipped shapefiles specifically
+def validate_mac_osx_shapefile(filenamelist):
+    return True
+
+
 def validate_shapefiles_have_all_parts(filenamelist):
     shp = []
     prj = []
