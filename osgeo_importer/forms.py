@@ -41,6 +41,11 @@ class UploadFileForm(forms.Form):
             if is_zipfile(f):
                 with ZipFile(f) as zip:
                     for zipname in zip.namelist():
+                        # This is getting file names
+                        # Errors on MACOSX because it's a directory
+                        # Skip mac directory
+                        if zipname == '__MACOSX/':
+                            continue
                         _, zipext = zipname.split(os.extsep, 1)
                         zipext = zipext.lstrip('.').lower()
                         if zipext in VALID_EXTENSIONS:
