@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import shutil
 import tempfile
 from zipfile import is_zipfile, ZipFile
@@ -24,6 +25,44 @@ class UploadFileForm(forms.Form):
         model = UploadFile
         fields = ['file']
 
+    def process_zip(self, zipfile, extractdir=None):
+        '''
+        Extracts and flattens a zip file and returns the list of files within it.
+        '''
+        if type(zipfile) is not ZipFile:
+            if not is_zipfile(zipfile):
+                return []
+            else:
+                zipfile = ZipFile(zipfile)
+
+        if extractdir is None:
+            extractdir = tempfile.mkdtemp()
+        zipfile.extractall(extractdir)
+        basezip = os.path.basename(zipfile.filename)
+        # Zipfile has already been extracted, remove it if it is still present
+        if basezip in os.listdir(extractdir):
+            os.remove('{}/{}'.format(extractdir, basezip))
+
+        # Walk through directories, flatten any subdirectories, and process any subzips
+        for dirpath, dirnames, filenames in os.walk(extractdir):
+            for f in filenames:
+                if is_zipfile(os.path.join(dirpath, f)):
+                    filenames.extend(self.process_zip(os.path.join(dirpath, f), dirpath))
+                    filenames.remove(f)
+                else:
+                    # This prevents repeating the directory prefix and the top level directory
+                    if os.path.basename(dirpath) != os.path.basename(extractdir):
+                        prefix = '{}_'.format(os.path.basename(dirpath))
+                    else:
+                        prefix = ''
+                    try:
+                        os.rename(os.path.join(dirpath, f), os.path.join(extractdir, prefix + f))
+                    except OSError:
+                        print ("Could not move %s " % os.path.join(dirpath, f))
+
+        # return flat list of all files extracted
+        return [f for f in os.listdir(extractdir) if os.path.isfile(os.path.join(extractdir, f))]
+
     def clean(self):
         cleaned_data = super(UploadFileForm, self).clean()
         outputdir = tempfile.mkdtemp()
@@ -40,14 +79,12 @@ class UploadFileForm(forms.Form):
 
             if is_zipfile(f):
                 with ZipFile(f) as zip:
-                    for zipname in zip.namelist():
-                        # Skip mac directory sidecar
-                        if zipname == '__MACOSX/':
-                            continue
-                        _, zipext = zipname.split(os.extsep, 1)
+                    zip_files = self.process_zip(zip, outputdir)
+                    for zf in zip_files:
+                        _, zipext = zf.split(os.extsep, 1)
                         zipext = zipext.lstrip('.').lower()
                         if zipext in VALID_EXTENSIONS:
-                            process_files.append(zipname)
+                            process_files.append(zf)
             else:
                 process_files.append(f.name)
 
@@ -64,15 +101,8 @@ class UploadFileForm(forms.Form):
                     for chunk in f.chunks():
                         outfile.write(chunk)
                 cleaned_files.append(outfile)
-            elif is_zipfile(f):
-                with ZipFile(f) as zip:
-                    for zipfile in zip.namelist():
-                        if zipfile in process_files:
-                            with zip.open(zipfile) as zf:
-                                mkdir_p(os.path.join(outputdir, os.path.dirname(zipfile)))
-                                with open(os.path.join(outputdir, zipfile), 'w') as outfile:
-                                    shutil.copyfileobj(zf, outfile)
-                                    cleaned_files.append(outfile)
+
+        # Have a separate check for all files in zip files?
 
         # After moving files in place make sure they can be opened by inspector
         inspected_files = []
@@ -87,4 +117,5 @@ class UploadFileForm(forms.Form):
             inspected_files.append(cleaned_file)
 
         cleaned_data['file'] = inspected_files
+        cleaned_data.remove('nonefile')
         return cleaned_data
