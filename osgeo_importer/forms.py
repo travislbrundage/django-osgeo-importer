@@ -24,7 +24,117 @@ class UploadFileForm(forms.Form):
         model = UploadFile
         fields = ['file']
 
+    # TODO: If all works, reformat and resubmit
+    def process_zip(self, zipfile, outputdir, cleaned_files=[], prefix=''):
+        check_nesteds = []
+        all_names = zipfile.namelist()
+        base_prefix = prefix
+        for zipname in zipfile.namelist():
+            filename = zipname.split(os.extsep, 1)
+            # is a directory
+            # This is now the only one not working correctly
+            # It's not correctly prepending the current directory
+            if len(filename) == 1:
+                # Walk through directories, flatten any subdirectories, and process any subzips
+                for dirpath, dirnames, filenames in os.walk(outputdir):
+                    for f in filenames:
+                        # TODO: Check this is grabbing zip file correctly
+                        # Theoretically we can copy the part below?
+                        if is_zipfile(os.path.join(dirpath, f)):
+                            with ZipFile(zipfile.open(os.path.join(dirpath, f))) as zf:
+                                prefix = '{}{}_'.format(base_prefix, os.path.basename(dirpath))
+                                #check_nesteds.remove(prefix)
+                                cleaned_files = self.process_zip(zf, outputdir, cleaned_files, prefix)
+                        # We don't have to worry about subdir case here because of how os.walk works
+                        # TODO: Check all subfiles and subdirectories are parsed correctly this way
+                        # This is the last thing to check works now
+                        else:
+                            # This prevents repeating the directory prefix and the top level directory
+                            # TODO: Check the top level compressed folder's name is not used
+                            # This needs to be fixed
+                            # Basically we want to grab the directory path below "outputdir"
+                            # so for ex we have tmp/outputdir at top
+                            # We go into tmp/outputdir/mydir - we just want "mydir" for prefix
+                            # We go into tmp/ouptutdir/mydir/anotherdir - we want "mydir_anotherdir" for prefix
+                            # So maybe we just get the basename of outputdir first
+                            # Then we split the string based on outputdir
+                            # Make sure below logic is correct
+                            outputdirname = os.path.basename(outputdir)
+                            if os.path.basename(dirpath) != outputdirname:
+                                fullpathname = os.path.abspath(dirpath)
+                                subdirpath = fullpathname.split(outputdirname)
+                                if len(subdirpath) > 1:
+                                    subdirpath = subdirpath[1][1:]
+                                    subdirpath.replace('/', '_')
+                                    prefix = '{}{}_'.format(base_prefix, subdirpath)
+                            # TODO: Fix what we're doing here - need to use prefix
+                            # This should be the same as normal behaviour
+                            fname = f.split(os.extsep, 1)
+                            if len(fname) > 1:
+                                if fname[1] in VALID_EXTENSIONS:
+                                    with zipfile.open(zipname) as zf:
+                                        mkdir_p(os.path.join(outputdir, prefix + os.path.dirname(zipname)))
+                                        #check_nesteds.remove(prefix)
+                                        # this should be the part to fix?
+                                        # not prefix + zipname apparently?
+                                        with open(os.path.join(outputdir, zipname), 'w') as outfile:
+                                            shutil.copyfileobj(zf, outfile)
+                                            cleaned_files.append(outfile)
+                            # Instead, do this to every subdirectory file at the beginning of the loop?
+                            # Calculate the prefix, then keep everything the same -except- add prefix
+                            '''
+                            try:
+                                os.rename(os.path.join(dirpath, f), os.path.join(outputdir, prefix + f))
+                            except OSError:
+                                # TODO: Check this logs error correctly
+                                logger.error('Could not move {}'.format(os.path.join(dirpath, f)))
+                            '''
+            # is a zipfile
+            # TODO: This is appending too much to the prefix
+            elif filename[1] == 'zip':
+                # zip file recurse
+                # how to create new zipfile with this sub zip file correctly?
+                # filename is just the name, we probably need full path to it?
+                # is it just os.path?
+                # os.path.abspath?
+                # TODO: Check this is grabbing zip file correctly
+                # Perhaps we need to extract it?
+                # why does iz_zipfile return false if there's a zip in the name?
+                #if is_zipfile(zipname):
+                    # Why does open fail?
+                    # it's because of the spaces in name?
+                nested_zip = zipfile.extract(zipname)
+                check_nesteds.append(nested_zip)
+                prefix = '{}{}_'.format(base_prefix, filename[0])
+                with ZipFile(nested_zip) as zf:
+                    cleaned_files = self.process_zip(zf, outputdir, cleaned_files, prefix)
+                    # check what base_prefix is here
+                    #check_nesteds.remove('asjfdlkajlfjakfd')
+
+                #else:
+                #    check_nesteds.remove('asjfdlkajlfjakfd')
+            # standard behaviour
+            # This part works!
+            elif filename[1] in VALID_EXTENSIONS:
+                with zipfile.open(zipname) as zf:
+                    mkdir_p(os.path.join(outputdir, os.path.dirname(zipname)))
+                    # Seems like we just don't want this base_prefix? Why would we? was base_prefix + zipname
+                    # We may also need to actually remove the last prefix
+                    # Which would be to take everything before the final _
+                    # Then use that as the prefix here instead of base_prefix
+                    final_index = base_prefix[-1:].rfind('_')
+                    if final_index > -1:
+                        final_prefix = base_prefix[:final_index]
+                    else:
+                        final_prefix = base_prefix
+                    with open(os.path.join(outputdir, final_prefix + zipname), 'w') as outfile:
+                        shutil.copyfileobj(zf, outfile)
+                        cleaned_files.append(outfile)
+
+        return cleaned_files
+
     def clean(self):
+        local_extensions = VALID_EXTENSIONS
         cleaned_data = super(UploadFileForm, self).clean()
         outputdir = tempfile.mkdtemp()
         files = self.files.getlist('file')
@@ -32,21 +142,20 @@ class UploadFileForm(forms.Form):
         process_files = []
 
         # Create list of all potentially valid files, exploding first level zip files
+        zip_files = []
+        reg_files = []
         for f in files:
-            errors = valid_file(f)
+            if is_zipfile(f):
+                zip_files.append(f)
+            else:
+                reg_files.append(f)
+
+        for rf in reg_files:
+            errors = valid_file(rf)
             if errors != []:
                 self.add_error('file', ', '.join(errors))
                 continue
-
-            if is_zipfile(f):
-                with ZipFile(f) as zip:
-                    for zipname in zip.namelist():
-                        _, zipext = zipname.split(os.extsep, 1)
-                        zipext = zipext.lstrip('.').lower()
-                        if zipext in VALID_EXTENSIONS:
-                            process_files.append(zipname)
-            else:
-                process_files.append(f.name)
+            process_files.append(rf.name)
 
         # Make sure shapefiles have all their parts
         if not validate_shapefiles_have_all_parts(process_files):
@@ -55,12 +164,13 @@ class UploadFileForm(forms.Form):
         # Unpack all zip files and create list of cleaned file objects, excluding any not in
         #    VALID_EXTENSIONS
         cleaned_files = []
-        for f in files:
-            if f.name in process_files:
-                with open(os.path.join(outputdir, f.name), 'w') as outfile:
-                    for chunk in f.chunks():
+        for rf in reg_files:
+            if rf.name in process_files:
+                with open(os.path.join(outputdir, rf.name), 'w') as outfile:
+                    for chunk in rf.chunks():
                         outfile.write(chunk)
                 cleaned_files.append(outfile)
+            '''
             elif is_zipfile(f):
                 with ZipFile(f) as zip:
                     for zipfile in zip.namelist():
@@ -70,6 +180,91 @@ class UploadFileForm(forms.Form):
                                 with open(os.path.join(outputdir, zipfile), 'w') as outfile:
                                     shutil.copyfileobj(zf, outfile)
                                     cleaned_files.append(outfile)
+            '''
+        # Regular files opens: os.path.join(outputdir, f.name)
+        # which is path/to/outputdir/<name of file>
+        # We want to do essentially the same thing with the zip file
+        # outputdir is where we extract it to
+        # path/to/outputdir/<name of extracted file>
+        # So make a function which takes
+        # zip file
+        # directory to extract to
+        # process_zip(zipfile, outputdir)
+        # for file in name list
+        # if the file is a directory
+        # get the dirname of this name - see what this gives
+        # os.walk through this directory?
+        # Maybe just copy the os.walk part of the process_zip.py
+        # Only instead of what we do in is_zipfile, recurse
+        # if the file is a zip, recurse
+        # if it's not a zip or directory
+        # Dow hat we have below - extract it to the outputdir
+
+        for zf in zip_files:
+            with ZipFile(zf) as zip:
+                # TODO: see if this works, uncomment and remove below
+                cleaned_files = self.process_zip(zip, outputdir, cleaned_files)
+                #for zipname in zip.namelist():
+                #    with zip.open(zipname) as zipfile:
+                #        mkdir_p(os.path.join(outputdir, os.path.dirname(zipname)))
+                #        with open(os.path.join(outputdir, zipname), 'w') as outfile:
+                #            shutil.copyfileobj(zipfile, outfile)
+                #            cleaned_files.append(outfile)
+                #for zipname in zip.namelist():
+                #    mkdir_p(os.path.join(outputdir, os.path.dirname(zipname)))
+                #    zip.extract(zipname, os.path.join(outputdir, os.path.dirname(zipname)))
+        # generate error to check what's in cleaned_files
+        # cleaned_files.remove('afdsfsaf')
+        # In order to do this, we may remove the part above where regular files
+        # are added to cleaned_files
+        # This removes our need for extracted_files
+        # TODO: Ensure this works with zip, regular files, and nested
+        # This doesn't work because it's not getting it as a file
+        #for dirpath, dirnames, filenames in os.walk(outputdir):
+        #    for f in filenames:
+        #        if f not in process_files:
+        #            with open(os.path.join(outputdir, f), 'w') as cf:
+        #                cleaned_files.append(cf)
+
+        '''
+        extracted_files = []
+        for zf in zip_files:
+            # Extract them
+            # Validate them
+            with ZipFile(zf) as zip:
+                for zipname in zip.namelist():
+                    filename = zipname.split(os.extsep, 1)
+                    # is a directory
+                    if len(filename) == 1:
+                        # need to figure out what to do here
+                        with zip.open(zipname) as zipfile:
+                            zip_dir = dir(zipfile)
+                            zip_dir_type = type(zipfile)
+                    else:
+                        zipext = filename[1]
+                        zipext = zipext.lstrip('.').lower()
+                        if zipext in VALID_EXTENSIONS:
+                            if zipext == 'zip':
+                                # recursion?
+                                with zip.open(zipname) as zipfile:
+                                    zip_zip = dir(zipfile)
+                                    zip_zip_type = type(zipfile)
+                            else:
+                                with zip.open(zipname) as zipfile:
+                                    mkdir_p(os.path.join(outputdir, os.path.dirname(zipname)))
+                                    with open(os.path.join(outputdir, zipname), 'w') as outfile:
+                                        shutil.copyfileobj(zipfile, outfile)
+                                        extracted_files.append(outfile)
+        '''
+        '''
+        if is_zipfile(f):
+            with ZipFile(f) as zip:
+                for zipname in zip.namelist():
+                    _, zipext = zipname.split(os.extsep, 1)
+                    zipext = zipext.lstrip('.').lower()
+                    if zipext in VALID_EXTENSIONS:
+                        process_files.append(zipname)
+        '''
 
         # After moving files in place make sure they can be opened by inspector
         inspected_files = []
@@ -84,4 +279,6 @@ class UploadFileForm(forms.Form):
             inspected_files.append(cleaned_file)
 
         cleaned_data['file'] = inspected_files
+        # random failure should happen
+        # cleaned_data.remove('asfdjasfd')
         return cleaned_data
